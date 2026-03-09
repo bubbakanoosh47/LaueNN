@@ -204,7 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--preflight-max-age-days",
         type=int,
         default=None,
-        help="Override the maximum allowed age (in days) for the Step0 preflight report.",
+        help="Override the maximum allowed age (in days) for the Step0 detector preflight report.",
     )
     return parser
 
@@ -228,15 +228,34 @@ def _check_step0_preflight(material: str, output_root: Path, max_age_days: int) 
     status = None
     for key in ("validation", "status", "result"):
         if key in data:
-            status = str(data[key])
+            status = data[key]
             break
     if status is None:
         return False, "Preflight report missing validation status"
-    if "PASS" not in status.upper():
-        return False, f"Preflight validation not PASS (status={status})"
+
+    # Accept several status formats: string containing PASS, boolean True,
+    # or dicts with common keys like 'is_valid' or 'valid'. Fall back to
+    # string check if unknown.
+    if isinstance(status, str):
+        if "PASS" not in status.upper():
+            return False, f"Preflight validation not PASS (status={status})"
+    elif isinstance(status, bool):
+        if not status:
+            return False, f"Preflight validation not PASS (status={status})"
+    elif isinstance(status, dict):
+        if status.get("is_valid") is True or status.get("valid") is True:
+            pass
+        else:
+            s = str(status)
+            if "PASS" not in s.upper():
+                return False, f"Preflight validation not PASS (status={status})"
+    else:
+        s = str(status)
+        if "PASS" not in s.upper():
+            return False, f"Preflight validation not PASS (status={status})"
 
     # Check timestamp recency if present
-    ts_keys = ("timestamp", "generated", "run_timestamp", "generated_at")
+    ts_keys = ("timestamp", "generated", "run_timestamp", "generated_at", "generated_at_utc")
     ts_val = None
     for k in ts_keys:
         if k in data:

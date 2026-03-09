@@ -26,7 +26,7 @@ setuptools.setup(
     
     packages=find_packages(),
     
-    url="https://github.com/bubbakanoosh47/lauetoolsnn",
+    url="https://github.com/bubbakanoosh47/LaueNN",
     
     setup_requires=['setuptools_scm'],
     #setup_requires=['setuptools_scm', 'matplotlib', 'Keras', 'scipy','numpy', 'h5py', 'tensorflow', 'PyQt5', 'scikit-learn', 'fabio', 'networkx', 'scikit-image', 'tqdm'],
