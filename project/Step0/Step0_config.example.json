@@ -1,0 +1,42 @@
+{
+  "material_": "Ni",
+  "material1_": "Ni",
+  "prefix": "",
+
+  "use_detector_catalog": true,
+  "detector_name": "development",
+  "apply_manual_overrides": true,
+  "resolved_detector_name": "preflight_detector",
+
+  "detectorparameters": [79.553, 979.32, 932.31, 0.37, 0.447],
+  "pixelsize": 0.0734,
+  "dim1": 2018,
+  "dim2": 2016,
+  "geometry": "Z>0",
+  "hardware_label": "sCMOS",
+
+  "strict_validation": true,
+  "fail_on_warnings": false,
+
+  "sensitivity_enabled": true,
+  "sensitivity_deltas": {
+    "distance": 1.0,
+    "xcen": 5.0,
+    "ycen": 5.0,
+    "angle_beta": 0.01,
+    "angle_gamma": 0.01,
+    "pixelsize": 0.001
+  },
+  "tracked_metrics": [
+    "center_offset_norm_mm",
+    "scattering_coverage_deg"
+  ],
+
+  "allowed_tweaks": {
+    "distance": 2.0,
+    "xcen": 20.0,
+    "ycen": 20.0,
+    "angle_beta": 0.03,
+    "angle_gamma": 0.03
+  }
+}

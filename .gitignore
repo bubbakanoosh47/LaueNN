@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer/packaging artifacts
+pip-wheel-metadata/
+
+# Test / lint
+.pytest_cache/
+.mypy_cache/
+
+# IPython
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+
+# IDEs
+.vscode/
+
+# Logs
+*.log
+/project/Ni

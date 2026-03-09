@@ -1,0 +1,24 @@
+{
+  "_comment": "Step 3b configuration for visualizing and assessing simulated Laue patterns",
+  
+  "simulated_data_dir": "project/Ni/simulated_dataset",
+  
+  "_comment_indices": "Specify pattern indices to visualize, or null for all (limited by grid size)",
+  "pattern_indices": null,
+  
+  "_comment_grid": "Grid layout for pattern visualization",
+  "grid_rows": 2,
+  "grid_cols": 2,
+  
+  "_comment_analysis": "Analysis options",
+  "show_statistics": true,
+  "show_ground_truth": true,
+  
+  "_comment_detector": "Detector dimensions (should match Step 3a settings)",
+  "dim1": 2018,
+  "dim2": 2016,
+  
+  "_comment_output": "Output settings (null means interactive display)",
+  "output_figure": null,
+  "dpi": 150
+}

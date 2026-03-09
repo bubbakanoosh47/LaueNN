@@ -1,0 +1,15 @@
+{
+  "material_": "Ni",
+  "material1_": "Ni",
+  "prefix": "",
+  "batch_size": 50,
+  "softmax_threshold": 0.80,
+  "symmetry": "cubic",
+  "SG": 225,
+  "calculate_strain": true,
+  "angular_tolerance": 1.0,
+  "confidence_thresholds": [0.5, 0.6, 0.7, 0.8, 0.9],
+  "plot_top_n_errors": 10,
+  "save_detailed_results": true,
+  "random_seed": 42
+}

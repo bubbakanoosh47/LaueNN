@@ -1,0 +1,15 @@
+{
+  "material_": "Ni",
+  "material1_": "Ni",
+  "prefix": "",
+  "nb_grains_per_lp": 5,
+  "grains_nb_simulate": 100,
+  "grid_batch_size": 40,
+  "grid_cv_folds": 5,
+  "step2a_log_file": "",
+  "activation_functions": [],
+  "learning_rates": [],
+  "dropout_offsets": [-0.1, 0.0, 0.1],
+  "kernel_multipliers": [0.5, 1.0, 2.0, 5.0],
+  "n_jobs": -1
+}

@@ -1,0 +1,14 @@
+matplotlib
+Keras
+numpy
+h5py
+tensorflow
+PyQt5
+scikit-learn
+scikeras
+seaborn
+fabio
+networkx
+scikit-image
+tqdm
+scipy

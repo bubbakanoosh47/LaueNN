@@ -1,0 +1,15 @@
+{
+  "material_": "Ni",
+  "material1_": "Ni",
+  "prefix": "",
+  "nb_grains_per_lp": 5,
+  "grains_nb_simulate": 100,
+  "batch_size": 50,
+  "epochs": 5,
+  "kernel_coeff": 1e-5,
+  "bias_coeff": 1e-6,
+  "learning_rate": 0.001,
+  "patience": 2,
+  "activation": "relu",
+  "dropout_rate": 0.3
+}
