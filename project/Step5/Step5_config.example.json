@@ -1,0 +1,34 @@
+{
+  "_comment": "Step 5: Real experimental Laue image analysis",
+
+  "material_": "Ni",
+  "material1_": "Ni",
+  "prefix": "",
+
+  "_comment_input": "Input may be a folder or a single image file",
+  "input_path": "lauetoolsnn/examples/GaN_Si",
+  "image_glob": "*.tif",
+  "recursive": false,
+  "limit_images": null,
+
+  "_comment_detector": "Detector geometry for radial metrics",
+  "pixelsize": 0.0734,
+  "detector_center": null,
+
+  "_comment_blob": "Blob detection parameters for spot counting",
+  "blob_detection": {
+    "blur_sigma": 0.8,
+    "min_sigma": 2.0,
+    "max_sigma": 8.0,
+    "num_sigma": 10,
+    "threshold": 0.12,
+    "overlap": 0.5,
+    "exclude_border": true
+  },
+
+  "_comment_quality": "Optional fixed saturation threshold; null uses image p99.9",
+  "saturation_value": null,
+
+  "output_subdir": "step5_experimental_metrics",
+  "save_plots": true
+}

@@ -213,3 +213,134 @@ Detector parameters were previously:
 
 **Status:** Applied ✓
 **Context:** Introduces a detector quality gate before Step 1 to reduce downstream failures and make detector tuning explicit/reproducible.
+
+### 7. Step5 - Real Experimental Pattern Metrics Workflow
+**Files:**
+- Created: `project/Step5/Step5_Analyze_Experimental_Patterns_LaueNN.py` (core logic around lines 152-487)
+- Created: `project/Step5/Step5_config.example.json`
+- Created: `project/Step5/README.md`
+- Modified: `project/step_defaults.py` (added `STEP5_DEFAULTS` around line 271 and `ALL_STEPS["step5"]` around line 318)
+- Modified: `project/README.md` (Step 5 workflow/docs additions around lines 33-45, 143-149, 282-287)
+- Modified: `README_AI_GUIDE.md` (Step 5 status/workflow updates around lines 169, 241-251, 275)
+
+**Issue / Gap:**
+- Workflow previously ended at synthetic validation (Step 4) with no standardized script for real experimental image quality assessment.
+- No config-driven path to compute detector image quality metrics and compare against user-provided real-world references.
+- No lightweight mechanism to compare model-vs-human Euler angle estimates per image.
+
+**Fix Applied:**
+1. Added new **Step 5** script for real image analysis:
+   - Reads single image or directory (`input_path`, `image_glob`, `recursive`, `limit_images`)
+   - Supports TIFF/EDF/CBF/MCCD through `fabio` with fallback to matplotlib image loading
+   - Computes robust per-image intensity metrics (`p1`, `p99`, dynamic range, saturation fraction, median/MAD)
+   - Performs blob-based spot extraction (`skimage.feature.blob_log`) and computes spot metrics (count, density, sigma, peak intensity)
+   - Computes radial and spatial metrics (mean/std radial spread, quadrant imbalance)
+   - Exports:
+     - `step5_image_metrics.csv`
+     - `step5_summary.json`
+     - `step5_metrics_summary.png`
+
+2. Added optional reference metric comparison:
+   - `real_world_metrics_csv` support keyed by `filename_column`
+   - Writes `step5_reference_metric_deltas.csv` for overlapping numeric fields
+
+3. Added optional angle comparison:
+   - `human_angles_csv` and `model_angles_csv` support
+   - configurable `angle_columns` (default `euler1,euler2,euler3`)
+   - wrapped absolute angular errors (mod 360) and aggregate MAE/RMSE
+   - writes `step5_angle_comparison.csv`
+
+4. Added Step 5 defaults and documentation integration:
+   - New `STEP5_DEFAULTS` in centralized defaults
+   - Step 5 added to workflow and config lists in project docs
+   - AI guide updated with Step 5 section and command example
+
+**Status:** Applied ✓
+**Context:** Implements first-pass production-ready real experimental image metrics workflow, bridging synthetic validation (Step 4) to real-data QA with optional human/model angle benchmarking.
+
+### 8. Step5 - CSV Template Generator for Human/Reference Data Entry
+**Files:**
+- Created: `project/Step5/Step5_Generate_CSV_Templates.py`
+- Created: `project/Step5/templates/human_angles_template.csv`
+- Created: `project/Step5/templates/model_angles_template.csv`
+- Created: `project/Step5/templates/real_world_metrics_template.csv`
+- Modified: `project/Step5/README.md`
+- Modified: `project/Step5/Step5_config.example.json`
+
+**Issue / Gap:**
+- Step 5 supports angle/metric comparison CSVs, but users had to hand-build CSV rows for each image filename.
+- Manual filename entry is error-prone (typos, missing rows, mismatched keys) and slows real-data onboarding.
+
+**Fix Applied:**
+1. Added a small CLI helper that scans image files and auto-generates three template CSVs with consistent filename keys:
+   - `human_angles_template.csv`
+   - `model_angles_template.csv`
+   - `real_world_metrics_template.csv`
+2. Added starter template files in `project/Step5/templates/`.
+3. Updated Step 5 README with generation command and usage notes.
+4. Updated Step 5 config example to point to the template CSV locations by default.
+
+**Status:** Applied ✓
+**Context:** Reduces setup friction and key mismatches when importing human-estimated angles and real-world reference metrics for Step 5 comparison reports.
+
+### 9. Step5 - Single Image Spot Inspection Utility (Overlay Default On)
+**Files:**
+- Created: `project/Step5/Step5_Inspect_Spots_LaueNN.py`
+- Modified: `project/Step5/README.md`
+
+**Issue / Gap:**
+- Users needed a focused pre-model QA command to inspect a single real `.tif` image and verify extracted spot points before full inference.
+
+**Fix Applied:**
+1. Added `Step5_Inspect_Spots_LaueNN.py` to:
+   - load one image (`--input-image`)
+   - detect spot-like points via LoG blob detection
+   - export per-spot CSV (`pixel_x`, `pixel_y`, `intensity`, `sigma_px`)
+   - save overlay plot and summary chart
+2. Set overlay saving **enabled by default** (`--save-overlay` default true), with optional `--no-save-overlay` toggle.
+3. Added usage docs in Step 5 README.
+
+**Status:** Applied ✓
+**Context:** Provides a quick visual/data sanity check for real image inputs prior to passing data into prediction/indexation routines.
+
+### 10. Step5 Cleanup + Step6 Real Prediction Split
+**Files:**
+- Modified: `project/Step5/Step5_Analyze_Experimental_Patterns_LaueNN.py`
+- Modified: `project/Step5/Step5_config.example.json`
+- Modified: `project/Step5/README.md`
+- Modified: `project/step_defaults.py`
+- Created: `project/Step6/Step6_Predict_Experimental_HKL_LaueNN.py`
+- Created: `project/Step6/Step6_config.example.json`
+- Created: `project/Step6/README.md`
+- Modified: `project/README.md`
+- Modified: `README_AI_GUIDE.md`
+- Deleted: `project/Step5/Step5_Generate_CSV_Templates.py`
+- Deleted: `project/Step5/templates/human_angles_template.csv`
+- Deleted: `project/Step5/templates/model_angles_template.csv`
+- Deleted: `project/Step5/templates/real_world_metrics_template.csv`
+
+**Issue / Gap:**
+- Step 5 had expanded into optional human-vs-model and reference CSV comparisons, while user intent for Step 5 is pure pre-model spot/image quality metrics.
+- No dedicated step existed for true model inference on real experimental images in the refactored workflow.
+
+**Fix Applied:**
+1. **Step 5 simplified to metrics-only**:
+   - Removed real-world CSV delta comparison and human/model angle comparison logic.
+   - Removed related config keys and README sections.
+   - Kept core functionality: image statistics, blob-based spot metrics, summary CSV/JSON/plot.
+
+2. **Step 6 added for real prediction**:
+   - New script loads trained model artifacts from material directory (`model_*.json`, `model_*.weights.h5`, `MOD_grain_classhkl_angbin.npz`).
+   - Detects spots on real images.
+   - Converts spot XY to angular coordinates (`2theta`, `chi`) via detector parameters.
+   - Builds angular histogram descriptors and predicts HKL class/confidence per spot.
+   - Writes per-image prediction CSV, optional overlay, optional `.cor`, plus summary CSV/JSON.
+
+3. Added `STEP6_DEFAULTS` and registered `step6` in `ALL_STEPS`.
+
+4. Updated top-level docs to reflect the split:
+   - Step 5 = pre-model QA metrics
+   - Step 6 = model-based real-image HKL prediction
+
+**Status:** Applied ✓
+**Context:** Aligns workflow semantics with user expectations: Step 5 for quality inspection, Step 6 for inference/indexation outputs on real experimental data.

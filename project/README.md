@@ -4,7 +4,7 @@ Config-driven Python scripts for end-to-end Laue diffraction neural network work
 
 ## Workflow Overview
 
-The complete workflow consists of 8 steps:
+The complete workflow consists of 10 steps:
 
 | Step | Purpose | Input | Output |
 |------|---------|-------|--------|
@@ -16,6 +16,8 @@ The complete workflow consists of 8 steps:
 | **3** | Evaluate trained model on test data; compute accuracy, confusion matrix, and per-class metrics | Model from Step 2, test data from Step 1 | Evaluation metrics, confusion matrix, predictions |
 | **3a** | Generate synthetic Laue patterns with known ground-truth orientations for controlled model verification | Detector config, crystal parameters | Simulated patterns with orientation matrices |
 | **4** | Quantitative validation by comparing model predictions on synthetic patterns to ground-truth orientations; compute angular errors and success rates | Model from Step 2, simulated data from Step 3a | Validation metrics, confidence analysis, angular error plots |
+| **5** | Analyze real experimental Laue images and compute image/spot quality metrics before inference | Real detector images | Per-image metrics CSV, summary plots and JSON |
+| **6** | Predict HKL classes on real experimental Laue images using trained model artifacts | Trained model from Step 2, detector geometry, real detector images | Per-spot HKL prediction CSVs, confidence overlays, `.cor` files, prediction summary |
 
 ## Project Files
 
@@ -29,8 +31,10 @@ The complete workflow consists of 8 steps:
 - **Step3a/Step3a_Generate_simulateLPforPrediction_LaueNN.py** - Generate synthetic data with ground truth
 - **Step3b/Step3b_Visualize_SimulatedPatterns_LaueNN.py** - Visualize and inspect simulated patterns
 - **Step4/Step4_Validate_Predictions_LaueNN.py** - Quantitative validation vs ground truth
+- **Step5/Step5_Analyze_Experimental_Patterns_LaueNN.py** - Real experimental image/spot quality metrics (pre-model QA)
+- **Step6/Step6_Predict_Experimental_HKL_LaueNN.py** - Real experimental HKL prediction using trained model
 
-### Configuration Files (9 files)
+### Configuration Files (11 files)
 - **Step0/Step0_config.example.json** - Detector preflight config
 - **Step1_config.example.json** - Dataset generation config
 - **Step2_config.example.json** - Training config
@@ -40,6 +44,8 @@ The complete workflow consists of 8 steps:
 - **Step3a/Step3a_config.example.json** - Simulation config
 - **Step3b/Step3b_config.example.json** - Visualization config
 - **Step4/Step4_config.example.json** - Validation config
+- **Step5/Step5_config.example.json** - Real experimental image metrics config
+- **Step6/Step6_config.example.json** - Real experimental HKL prediction config
 
 ### Utilities
 - **step_utils.py** - Shared utility functions:
@@ -136,6 +142,20 @@ python project/Step4/Step4_Validate_Predictions_LaueNN.py \
   --config project/Step4/Step4_config.example.json
 ```
 Compares predictions on simulated patterns to ground-truth orientations. Provides final quantitative metrics (angular error, success rate, confidence statistics) before deploying to real experimental data.
+
+**Step 5: Real Experimental Pattern Metrics**
+```bash
+python project/Step5/Step5_Analyze_Experimental_Patterns_LaueNN.py \
+  --config project/Step5/Step5_config.example.json
+```
+Analyzes real detector images (for example `.tif`) and computes practical image and spot quality metrics for pre-model quality assurance.
+
+**Step 6: Real Experimental HKL Prediction**
+```bash
+python project/Step6/Step6_Predict_Experimental_HKL_LaueNN.py \
+  --config project/Step6/Step6_config.example.json
+```
+Runs true model inference on real images: spot detection, descriptor construction, per-spot HKL prediction/confidence, and export of prediction CSV/overlay/`.cor` outputs.
 
 ## Configuration Files
 
@@ -268,7 +288,17 @@ project/
 │   ├── predictions_Ni.pickle            # Raw predictions (Step 3)
 │   ├── validation_summary_Ni.png        # Validation plots (Step 4)
 │   ├── validation_summary_Ni.txt        # Validation report (Step 4)
-│   └── validation_results_Ni.pickle     # Detailed validation data (Step 4)
+│   ├── validation_results_Ni.pickle     # Detailed validation data (Step 4)
+│   └── step5_experimental_metrics/      # Real experimental image metrics (Step 5)
+│       ├── step5_image_metrics.csv
+│       ├── step5_metrics_summary.png
+│       └── step5_summary.json
+│   └── step6_prediction_results/        # Real experimental HKL prediction outputs (Step 6)
+│       ├── {image}_spot_predictions.csv
+│       ├── {image}_prediction_overlay.png
+│       ├── {image}_predicted.cor
+│       ├── step6_prediction_summary.csv
+│       └── step6_summary.json
 ```
 
 ## Using Step 2b for Final Hyperparameter Selection

@@ -1,0 +1,36 @@
+{
+  "_comment": "Step 6: Real experimental HKL prediction using trained LaueNN model",
+
+  "material_": "Ni",
+  "material1_": "Ni",
+  "prefix": "",
+
+  "_comment_input": "Input can be a folder or a single experimental image",
+  "input_path": "lauetoolsnn/examples/GaN_Si",
+  "image_glob": "*.tif",
+  "recursive": false,
+  "limit_images": null,
+
+  "_comment_detector": "Detector geometry used to convert pixel XY to angular coordinates",
+  "detectorparameters": [79.553, 979.32, 932.31, 0.37, 0.447],
+  "pixelsize": 0.0734,
+  "geometry": "Z>0",
+
+  "_comment_blob": "Blob detection parameters for spot extraction",
+  "blob_detection": {
+    "blur_sigma": 0.8,
+    "min_sigma": 2,
+    "max_sigma": 8,
+    "num_sigma": 10,
+    "threshold": 0.12,
+    "overlap": 0.5,
+    "exclude_border": true
+  },
+
+  "_comment_prediction": "Number of spots to build descriptors for HKL prediction",
+  "nb_spots_consider": 100,
+
+  "output_subdir": "step6_prediction_results",
+  "save_overlay": true,
+  "save_cor_file": true
+}

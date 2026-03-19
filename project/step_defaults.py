@@ -266,6 +266,69 @@ STEP4_DEFAULTS: Dict[str, Any] = {
 
 
 # ==============================================================================
+# STEP 5: REAL EXPERIMENTAL IMAGE METRICS
+# ==============================================================================
+STEP5_DEFAULTS: Dict[str, Any] = {
+    **BASE_MATERIAL,
+    **BASE_DETECTOR,
+    # Input images
+    "input_path": "lauetoolsnn/examples/GaN_Si",
+    "image_glob": "*.tif",
+    "recursive": False,
+    "limit_images": None,
+    # Optional detector center override [xcen, ycen] in pixels
+    "detector_center": None,
+    # Blob-based spot extraction
+    "blob_detection": {
+        "blur_sigma": 0.8,
+        "min_sigma": 2.0,
+        "max_sigma": 8.0,
+        "num_sigma": 10,
+        "threshold": 0.12,
+        "overlap": 0.5,
+        "exclude_border": True,
+    },
+    # If None, saturation threshold is estimated per image at p99.9
+    "saturation_value": None,
+    # Output
+    "output_subdir": "step5_experimental_metrics",
+    "save_plots": True,
+}
+
+
+# ==============================================================================
+# STEP 6: REAL EXPERIMENTAL HKL PREDICTION
+# ==============================================================================
+STEP6_DEFAULTS: Dict[str, Any] = {
+    **BASE_MATERIAL,
+    **BASE_DETECTOR,
+    # Input images
+    "input_path": "lauetoolsnn/examples/GaN_Si",
+    "image_glob": "*.tif",
+    "recursive": False,
+    "limit_images": None,
+    # Detector geometry conversion mode
+    "geometry": "Z>0",
+    # Blob-based spot extraction
+    "blob_detection": {
+        "blur_sigma": 0.8,
+        "min_sigma": 2,
+        "max_sigma": 8,
+        "num_sigma": 10,
+        "threshold": 0.12,
+        "overlap": 0.5,
+        "exclude_border": True,
+    },
+    # Prediction control
+    "nb_spots_consider": 100,
+    # Output
+    "output_subdir": "step6_prediction_results",
+    "save_overlay": True,
+    "save_cor_file": True,
+}
+
+
+# ==============================================================================
 # MASTER DICTIONARY FOR ALL STEPS
 # ==============================================================================
 ALL_STEPS = {
@@ -278,6 +341,8 @@ ALL_STEPS = {
     "step3a": STEP3A_DEFAULTS,
     "step3b": STEP3B_DEFAULTS,
     "step4": STEP4_DEFAULTS,
+    "step5": STEP5_DEFAULTS,
+    "step6": STEP6_DEFAULTS,
 }
 
 # Base categories available for reference and composition

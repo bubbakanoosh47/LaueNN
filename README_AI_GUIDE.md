@@ -166,6 +166,8 @@ All main workflow steps have been successfully refactored:
 - [x] Reconstruct Step 3a (Generate Simulated Data) in `/project/` ✓
 - [x] Reconstruct Step 3b (Visualize & Assess Simulated Patterns) in `/project/` ✓
 - [x] Reconstruct Step 4 (Quantitative Validation) in `/project/` ✓
+- [x] Reconstruct Step 5 (Real Experimental Pattern Metrics) in `/project/` ✓
+- [x] Reconstruct Step 6 (Real Experimental HKL Prediction) in `/project/` ✓
 
 ## Workflow Steps Overview
 
@@ -237,6 +239,32 @@ Compare neural network predictions on synthetic patterns against ground-truth or
   --config project/Step4/Step4_config.example.json
 ```
 
+### Step 5: Real Experimental Pattern Metrics
+Analyze real detector images and derive practical quality metrics (dynamic range, spot count/density, saturation fraction, radial spread, SNR proxy) before model inference.
+
+**Location:** `/project/Step5/`
+**Config:** `Step5_config.example.json`
+**Output:** Per-image metrics CSV, optional metric-delta CSV, optional angle-comparison CSV, summary plot/JSON
+
+**Quick example:**
+```bash
+.venv/bin/python project/Step5/Step5_Analyze_Experimental_Patterns_LaueNN.py \
+  --config project/Step5/Step5_config.example.json
+```
+
+### Step 6: Real Experimental HKL Prediction
+Run trained-model inference on real detector images. Detects spots, converts to angular descriptors, predicts HKL class per spot with confidence, and writes prediction CSV/overlay/`.cor` outputs.
+
+**Location:** `/project/Step6/`
+**Config:** `Step6_config.example.json`
+**Output:** Per-image spot prediction CSVs, confidence overlays, `.cor` files, prediction summary CSV/JSON
+
+**Quick example:**
+```bash
+.venv/bin/python project/Step6/Step6_Predict_Experimental_HKL_LaueNN.py \
+  --config project/Step6/Step6_config.example.json
+```
+
 ## Future Enhancements
 
 ### Detector Parameters System ✓ STARTED
@@ -258,7 +286,8 @@ Compare neural network predictions on synthetic patterns against ground-truth or
 - [ ] Extended workspace for multi-detector optimization
 - [ ] Integration tests for end-to-end workflow
 - [ ] Step 4c: Extended validation with strain tensor reconstruction
-- [ ] Step 5: Apply model to real experimental Laue patterns
+- [x] Step 5: Pre-model real image quality metrics
+- [x] Step 6: Apply model to real experimental Laue patterns
 
 
 ## Questions for the User
