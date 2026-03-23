@@ -1,0 +1,472 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LaueNN Workflow GUI</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        margin: 0;
+        background: #f7f8fb;
+        color: #1f2937;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .step-tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .step-tab {
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px 12px;
+        background: #fff;
+        cursor: pointer;
+      }
+      .step-tab.active {
+        border-color: #2563eb;
+        background: #eff6ff;
+      }
+      .field {
+        margin-bottom: 10px;
+      }
+      .field label {
+        display: block;
+        font-size: 12px;
+        margin-bottom: 4px;
+        color: #374151;
+      }
+      input, select, textarea, button {
+        font-family: inherit;
+      }
+      input, select, textarea {
+        width: 100%;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      textarea {
+        min-height: 90px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+        background: #fff;
+      }
+      button.primary {
+        background: #2563eb;
+        color: #fff;
+        border-color: #2563eb;
+      }
+      .job {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+        background: #fff;
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 13px;
+      }
+      .mono {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .artifact-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: 10px;
+      }
+      .artifact-thumb {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fff;
+        padding: 6px;
+      }
+      .artifact-thumb img {
+        width: 100%;
+        border-radius: 6px;
+        display: block;
+      }
+      .artifact-list {
+        margin: 0;
+        padding-left: 18px;
+      }
+      @media (max-width: 900px) {
+        .row { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useEffect, useMemo, useState } = React;
+
+      const STEP_ORDER = ["step1", "step2", "step3", "step5", "step6"];
+
+      function isPrimitive(value) {
+        return ["string", "number", "boolean"].includes(typeof value) || value === null;
+      }
+
+      function parseInput(raw, previous) {
+        if (typeof previous === "number") {
+          const n = Number(raw);
+          return Number.isNaN(n) ? previous : n;
+        }
+        if (typeof previous === "boolean") {
+          return Boolean(raw);
+        }
+        return raw;
+      }
+
+      function App() {
+        const [meta, setMeta] = useState(null);
+        const [material, setMaterial] = useState("");
+        const [configs, setConfigs] = useState({});
+        const [activeStep, setActiveStep] = useState("step1");
+        const [jobs, setJobs] = useState([]);
+        const [loading, setLoading] = useState(false);
+        const [logText, setLogText] = useState("");
+        const [selectedJobId, setSelectedJobId] = useState("");
+        const [reportData, setReportData] = useState(null);
+        const [reportError, setReportError] = useState("");
+        const [workflowId, setWorkflowId] = useState("");
+
+        const orderedSteps = useMemo(() => {
+          if (!meta?.steps) return [];
+          const byKey = new Map(meta.steps.map((s) => [s.key, s]));
+          return STEP_ORDER.filter((key) => byKey.has(key)).map((key) => byKey.get(key));
+        }, [meta]);
+
+        const activeStepSpec = orderedSteps.find((s) => s.key === activeStep);
+        const activeConfig = configs[activeStep] || {};
+
+        useEffect(() => {
+          loadMeta();
+          fetchJobs();
+          const timer = setInterval(fetchJobs, 3000);
+          return () => clearInterval(timer);
+        }, []);
+
+        async function loadMeta(materialOverride = "") {
+          const query = materialOverride ? `?material=${encodeURIComponent(materialOverride)}` : "";
+          const response = await fetch(`/api/workflow/meta${query}`);
+          const data = await response.json();
+          setMeta(data);
+          setMaterial(data.selected_material);
+          setConfigs(data.defaults || {});
+          if (!activeStep || !(data.defaults || {})[activeStep]) {
+            setActiveStep("step1");
+          }
+        }
+
+        async function fetchJobs() {
+          const response = await fetch("/api/jobs");
+          const data = await response.json();
+          setJobs(data || []);
+        }
+
+        function updateField(stepKey, key, value) {
+          setConfigs((prev) => ({
+            ...prev,
+            [stepKey]: {
+              ...(prev[stepKey] || {}),
+              [key]: value,
+            },
+          }));
+        }
+
+        async function runStep(stepKey) {
+          setLoading(true);
+          const payload = {
+            step: stepKey,
+            workflow_id: workflowId || undefined,
+            material,
+            overrides: configs[stepKey] || {},
+            output_root: "project",
+            data_root: "project",
+          };
+          const response = await fetch("/api/workflow/run", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const result = await response.json();
+          setLoading(false);
+          if (!response.ok) {
+            alert(result.detail || "Failed to start step");
+            return;
+          }
+          if (result.workflow_id) {
+            setWorkflowId(result.workflow_id);
+          }
+          setSelectedJobId(result.job_id);
+          fetchJobs();
+          const currentIndex = STEP_ORDER.indexOf(stepKey);
+          if (currentIndex >= 0 && currentIndex < STEP_ORDER.length - 1) {
+            setActiveStep(STEP_ORDER[currentIndex + 1]);
+          }
+        }
+
+        async function viewLog(jobId) {
+          const response = await fetch(`/api/jobs/${jobId}/logs`);
+          const text = await response.text();
+          setSelectedJobId(jobId);
+          setLogText(text);
+        }
+
+        async function viewReport(jobId) {
+          setReportError("");
+          const response = await fetch(`/api/jobs/${jobId}/report`);
+          const data = await response.json();
+          if (!response.ok) {
+            setReportError(data.detail || "Failed to load report");
+            return;
+          }
+          setSelectedJobId(jobId);
+          setReportData(data);
+        }
+
+        if (!meta) {
+          return <div className="container"><div className="card">Loading workflow metadata...</div></div>;
+        }
+
+        return (
+          <div className="container">
+            <div className="card">
+              <h1 style={{ marginTop: 0 }}>LaueNN Guided Workflow GUI</h1>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Select a metal, run Step 1 → Step 2 → Step 3 to train and validate, then Step 5/6 for real X-ray image measurement and prediction.
+              </p>
+              <div className="field" style={{ maxWidth: "340px" }}>
+                <label>Metal / material</label>
+                <select
+                  value={material}
+                  onChange={async (ev) => {
+                    const nextMaterial = ev.target.value;
+                    setMaterial(nextMaterial);
+                    setWorkflowId("");
+                    await loadMeta(nextMaterial);
+                  }}
+                >
+                  {(meta.materials || []).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="actions">
+                <button
+                  onClick={() => setWorkflowId("")}
+                  title="Start a new isolated run folder chain for next step"
+                >
+                  Start New Workflow Session
+                </button>
+              </div>
+              <div className="muted">Current workflow session: {workflowId || "(new session will be created on next run)"}</div>
+            </div>
+
+            <div className="row">
+              <div>
+                <div className="card">
+                  <h2 style={{ marginTop: 0 }}>Workflow Steps</h2>
+                  <div className="step-tabs">
+                    {orderedSteps.map((step) => (
+                      <button
+                        key={step.key}
+                        className={`step-tab ${activeStep === step.key ? "active" : ""}`}
+                        onClick={() => setActiveStep(step.key)}
+                      >
+                        {step.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h3 style={{ marginTop: 0 }}>{activeStepSpec?.title || activeStep}</h3>
+                  <p className="muted">{activeStepSpec?.description}</p>
+
+                  {Object.entries(activeConfig).map(([key, value]) => (
+                    <div className="field" key={key}>
+                      <label>{key}</label>
+                      {isPrimitive(value) && typeof value !== "boolean" && (
+                        <input
+                          value={value ?? ""}
+                          onChange={(ev) => updateField(activeStep, key, parseInput(ev.target.value, value))}
+                        />
+                      )}
+                      {typeof value === "boolean" && (
+                        <input
+                          type="checkbox"
+                          checked={value}
+                          onChange={(ev) => updateField(activeStep, key, ev.target.checked)}
+                          style={{ width: "auto" }}
+                        />
+                      )}
+                      {!isPrimitive(value) && (
+                        <textarea
+                          value={JSON.stringify(value, null, 2)}
+                          onChange={(ev) => {
+                            try {
+                              const parsed = JSON.parse(ev.target.value);
+                              updateField(activeStep, key, parsed);
+                            } catch (error) {
+                              // keep last valid value until JSON is valid
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
+                  ))}
+
+                  <div className="actions">
+                    <button
+                      onClick={() => {
+                        const idx = STEP_ORDER.indexOf(activeStep);
+                        if (idx > 0) setActiveStep(STEP_ORDER[idx - 1]);
+                      }}
+                    >
+                      Previous Step
+                    </button>
+                    <button
+                      onClick={() => {
+                        const idx = STEP_ORDER.indexOf(activeStep);
+                        if (idx < STEP_ORDER.length - 1) setActiveStep(STEP_ORDER[idx + 1]);
+                      }}
+                    >
+                      Next Step
+                    </button>
+                    <button className="primary" disabled={loading} onClick={() => runStep(activeStep)}>
+                      {loading ? "Starting..." : `Run ${activeStepSpec?.title || activeStep}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="card">
+                  <h2 style={{ marginTop: 0 }}>Jobs</h2>
+                  {jobs.map((job) => (
+                    <div className="job" key={job.id}>
+                      <div><strong>{job.step || "manual"}</strong> · {job.material || "-"}</div>
+                      <div className="muted">{job.id}</div>
+                      <div className="muted">workflow: {job.workflow_id || "-"}</div>
+                      <div>Status: <strong>{job.status}</strong> {job.returncode !== null ? `(rc=${job.returncode})` : ""}</div>
+                      <div className="muted">{(job.cmd || []).join(" ")}</div>
+                      <div className="actions" style={{ marginTop: "6px" }}>
+                        <button onClick={() => viewLog(job.id)}>View Logs</button>
+                        <button onClick={() => viewReport(job.id)}>View Results</button>
+                      </div>
+                    </div>
+                  ))}
+                  {!jobs.length && <div className="muted">No jobs yet.</div>}
+                </div>
+
+                <div className="card">
+                  <h2 style={{ marginTop: 0 }}>Job Logs</h2>
+                  <div className="muted">Selected job: {selectedJobId || "none"}</div>
+                  <div className="mono">{logText || "Select a job and click View Logs."}</div>
+                </div>
+
+                <div className="card">
+                  <h2 style={{ marginTop: 0 }}>Step Results Report</h2>
+                  {reportError && <div className="muted">{reportError}</div>}
+                  {!reportData && !reportError && (
+                    <div className="muted">Select a job and click View Results.</div>
+                  )}
+                  {reportData && (
+                    <div>
+                      <div>
+                        <strong>{reportData.step || "step"}</strong> · {reportData.material || "-"}
+                      </div>
+                      <div className="muted">Output: {reportData.discovery?.output_dir || "not found"}</div>
+
+                      {reportData.discovery?.summary && (
+                        <div style={{ marginTop: "10px" }}>
+                          <div><strong>Summary</strong></div>
+                          <div className="mono">{JSON.stringify(reportData.discovery.summary, null, 2)}</div>
+                        </div>
+                      )}
+
+                      {!!(reportData.discovery?.grouped?.images || []).length && (
+                        <div style={{ marginTop: "10px" }}>
+                          <div><strong>Plots & Images</strong></div>
+                          <div className="artifact-grid">
+                            {reportData.discovery.grouped.images.map((item) => (
+                              <a className="artifact-thumb" key={item.relative_path} href={item.url} target="_blank" rel="noreferrer">
+                                <img src={item.url} alt={item.name} />
+                                <div className="muted">{item.name}</div>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {[
+                        ["tables_and_reports", "Tables & Reports"],
+                        ["models_and_data", "Models & Data"],
+                        ["documents", "Documents"],
+                        ["other", "Other"],
+                      ].map(([key, title]) => {
+                        const items = reportData.discovery?.grouped?.[key] || [];
+                        if (!items.length) return null;
+                        return (
+                          <div key={key} style={{ marginTop: "10px" }}>
+                            <div><strong>{title}</strong></div>
+                            <ul className="artifact-list">
+                              {items.map((item) => (
+                                <li key={item.relative_path}>
+                                  <a href={item.url} target="_blank" rel="noreferrer">{item.name}</a>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

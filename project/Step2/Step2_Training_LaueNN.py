@@ -13,6 +13,7 @@ import argparse
 import ast
 import itertools
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -140,7 +141,11 @@ def _load_optimized_hyperparameters(
 
 
 
-def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
+def run_step2(
+    params: Dict[str, Any],
+    data_root: Path | None = None,
+    output_root: Path | None = None,
+) -> Path:
     """Train the neural network model."""
     import matplotlib
     matplotlib.use('Agg')  # Non-interactive backend for plotting
@@ -162,17 +167,21 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     activation = params.get("activation", "relu")
     dropout_rate = float(params.get("dropout_rate", 0.3))
 
-    # Get save directory
-    save_directory = get_save_directory(params, data_root)
-    if not save_directory.exists():
+    # Input directory from Step 1
+    input_directory = get_save_directory(params, data_root)
+    if not input_directory.exists():
         raise FileNotFoundError(
-            f"Training data directory not found: {save_directory}\n"
+            f"Training data directory not found: {input_directory}\n"
             f"Please run Step 1 first to generate the dataset."
         )
-    print(f"Training data directory: {save_directory}")
+    print(f"Training data directory: {input_directory}")
+
+    # Output directory for Step 2 artifacts
+    output_directory = get_save_directory(params, output_root if output_root is not None else data_root)
+    print(f"Step 2 output directory: {output_directory}")
 
     optimized_params, optimized_source = _load_optimized_hyperparameters(
-        save_directory, material_, material1_
+        output_directory, material_, material1_
     )
     if optimized_params is not None:
         activation = optimized_params["activation"]
@@ -185,11 +194,11 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
 
     # Load class data
     print("Loading class data...")
-    classhkl = np.load(save_directory / "MOD_grain_classhkl_angbin.npz")["arr_0"]
-    angbins = np.load(save_directory / "MOD_grain_classhkl_angbin.npz")["arr_1"]
-    loc_new = np.load(save_directory / "MOD_grain_classhkl_angbin.npz")["arr_2"]
+    classhkl = np.load(input_directory / "MOD_grain_classhkl_angbin.npz")["arr_0"]
+    angbins = np.load(input_directory / "MOD_grain_classhkl_angbin.npz")["arr_1"]
+    loc_new = np.load(input_directory / "MOD_grain_classhkl_angbin.npz")["arr_2"]
 
-    with open(save_directory / "class_weights.pickle", "rb") as input_file:
+    with open(input_directory / "class_weights.pickle", "rb") as input_file:
         class_weights = cPickle.load(input_file)
     class_weights = class_weights[0]
 
@@ -219,7 +228,7 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     # Verify batch content
     print(f"\nVerifying batch content (batch_size={batch_size})...")
     trainy_inbatch = array_generator_verify(
-        str(save_directory / "training_data"),
+        str(input_directory / "training_data"),
         batch_size,
         len(classhkl),
         loc_new,
@@ -251,14 +260,14 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     # Create data generators
     print("\nCreating data generators...")
     training_data_generator = array_generator(
-        str(save_directory / "training_data"),
+        str(input_directory / "training_data"),
         batch_size,
         len(classhkl),
         loc_new,
         print,
     )
     testing_data_generator = array_generator(
-        str(save_directory / "testing_data"),
+        str(input_directory / "testing_data"),
         batch_size,
         len(classhkl),
         loc_new,
@@ -268,7 +277,7 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     # Setup callbacks
     es = EarlyStopping(monitor="val_accuracy", mode="max", patience=patience)
     ms = ModelCheckpoint(
-        str(save_directory / "best_val_acc_model.h5"),
+        str(output_directory / "best_val_acc_model.h5"),
         monitor="val_accuracy",
         mode="max",
         save_best_only=True,
@@ -276,9 +285,9 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
 
     # Model save path
     if material_ != material1_:
-        model_name = save_directory / f"model_{material_}_{material1_}"
+        model_name = output_directory / f"model_{material_}_{material1_}"
     else:
-        model_name = save_directory / f"model_{material_}"
+        model_name = output_directory / f"model_{material_}"
 
     # Train the model
     print(f"\nTraining model for {epochs} epochs...")
@@ -347,9 +356,9 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     ax[1].grid(True, alpha=0.3)
 
     if material_ != material1_:
-        plot_path = save_directory / f"loss_accuracy_{material_}_{material1_}.png"
+        plot_path = output_directory / f"loss_accuracy_{material_}_{material1_}.png"
     else:
-        plot_path = save_directory / f"loss_accuracy_{material_}.png"
+        plot_path = output_directory / f"loss_accuracy_{material_}.png"
 
     plt.tight_layout()
     plt.savefig(str(plot_path), bbox_inches="tight", format="png", dpi=300)
@@ -358,9 +367,9 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
 
     # Save training log
     if material_ != material1_:
-        log_path = save_directory / f"loss_accuracy_logger_{material_}_{material1_}.txt"
+        log_path = output_directory / f"loss_accuracy_logger_{material_}_{material1_}.txt"
     else:
-        log_path = save_directory / f"loss_accuracy_logger_{material_}.txt"
+        log_path = output_directory / f"loss_accuracy_logger_{material_}.txt"
 
     with open(log_path, "w") as text_file:
         text_file.write("# EPOCH, LOSS, VAL_LOSS, ACCURACY, VAL_ACCURACY\n")
@@ -378,7 +387,7 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     # Generate classification report on test data
     print("\nGenerating classification report on test data...")
     x_test, y_test = vali_array(
-        str(save_directory / "testing_data"), 50, len(classhkl), loc_new, print
+        str(input_directory / "testing_data"), 50, len(classhkl), loc_new, print
     )
     y_test_labels = np.argmax(y_test, axis=-1)
     y_pred_labels = np.argmax(model.predict(x_test), axis=-1)
@@ -386,7 +395,24 @@ def run_step2(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     print("\nClassification Report:")
     print(classification_report(y_test_labels, y_pred_labels))
 
-    return save_directory
+    # Copy metadata needed by downstream steps when input/output roots differ
+    metadata_candidates = [
+        "MOD_grain_classhkl_angbin.npz",
+        "grain_classhkl_angbin.npz",
+        "class_weights.pickle",
+    ]
+    for name in metadata_candidates:
+        src = input_directory / name
+        dst = output_directory / name
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+
+    for pickle_file in input_directory.glob("classhkl_data*.pickle"):
+        dst = output_directory / pickle_file.name
+        if not dst.exists():
+            shutil.copy2(pickle_file, dst)
+
+    return output_directory
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -405,6 +431,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("project"),
         help="Base directory where Step 1 output dataset folder is located (default: project/).",
     )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help="Base directory where Step 2 artifacts are written (default: same as --data-root).",
+    )
     return parser
 
 
@@ -418,7 +450,7 @@ def main() -> None:
     args = parser.parse_args()
 
     params = load_config(args.config, STEP2_DEFAULTS)
-    save_directory = run_step2(params, data_root=args.data_root)
+    save_directory = run_step2(params, data_root=args.data_root, output_root=args.output_root)
     print(f"\nStep 2 completed. Model files written to: {save_directory}")
 
 

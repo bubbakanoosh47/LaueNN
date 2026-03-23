@@ -36,7 +36,12 @@ from lauetoolsnn.utils_lauenn import (
 from lauetoolsnn.NNmodels import read_hdf5
 
 
-def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
+def run_step3(
+    params: Dict[str, Any],
+    data_root: Path | None = None,
+    model_root: Path | None = None,
+    output_root: Path | None = None,
+) -> Path:
     """Load trained model and evaluate on test data.
     
     Optionally performs full indexation workflow with orientation matrix calculation.
@@ -85,8 +90,16 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     grid_y = int(params.get("grid_size_y", 5))
     n_jobs = int(params.get("n_jobs", -1))
     
-    # Get model directory
-    model_directory = get_save_directory(params, data_root)
+    # Data directory from Step 1 (class metadata + test data)
+    data_directory = get_save_directory(params, data_root)
+    if not data_directory.exists():
+        raise FileNotFoundError(
+            f"Data directory not found: {data_directory}\n"
+            f"Please run Step 1 first to generate dataset metadata."
+        )
+
+    # Model directory from Step 2
+    model_directory = get_save_directory(params, model_root if model_root is not None else data_root)
     if not model_directory.exists():
         raise FileNotFoundError(
             f"Model directory not found: {model_directory}\n"
@@ -94,11 +107,18 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
         )
     print(f"Model directory: {model_directory}")
 
+    # Report/output directory for Step 3 artifacts
+    output_directory = get_save_directory(
+        params,
+        output_root if output_root is not None else (model_root if model_root is not None else data_root),
+    )
+    print(f"Step 3 output directory: {output_directory}")
+
     # Load class data
     print("\nLoading class data...")
-    classhkl = np.load(model_directory / "MOD_grain_classhkl_angbin.npz")["arr_0"]
-    angbins = np.load(model_directory / "MOD_grain_classhkl_angbin.npz")["arr_1"]
-    loc_new = np.load(model_directory / "MOD_grain_classhkl_angbin.npz")["arr_2"]
+    classhkl = np.load(data_directory / "MOD_grain_classhkl_angbin.npz")["arr_0"]
+    angbins = np.load(data_directory / "MOD_grain_classhkl_angbin.npz")["arr_1"]
+    loc_new = np.load(data_directory / "MOD_grain_classhkl_angbin.npz")["arr_2"]
 
     n_bins = len(angbins) - 1
     n_outputs = len(classhkl)
@@ -106,7 +126,7 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
 
     # Load HKL class definitions
     print("Loading HKL class definitions...")
-    with open(model_directory / f"classhkl_data_nonpickled_{material_}.pickle", "rb") as f:
+    with open(data_directory / f"classhkl_data_nonpickled_{material_}.pickle", "rb") as f:
         hkl_all_class0 = cPickle.load(f)[0]
 
     # Display HKL classes (first 5)
@@ -201,7 +221,7 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     plt.title(f'Confusion Matrix - {material_}', fontsize=14)
     plt.tight_layout()
 
-    confusion_matrix_path = model_directory / f"confusion_matrix_{material_}.png"
+    confusion_matrix_path = output_directory / f"confusion_matrix_{material_}.png"
     plt.savefig(str(confusion_matrix_path), dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Confusion matrix saved to: {confusion_matrix_path}")
@@ -255,13 +275,13 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
-    confidence_plot_path = model_directory / f"confidence_distribution_{material_}.png"
+    confidence_plot_path = output_directory / f"confidence_distribution_{material_}.png"
     plt.savefig(str(confidence_plot_path), dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Confidence distribution plot saved to: {confidence_plot_path}")
 
     # Save detailed results
-    results_path = model_directory / f"prediction_results_{material_}.txt"
+    results_path = output_directory / f"prediction_results_{material_}.txt"
     with open(results_path, 'w') as f:
         f.write("="*70 + "\n")
         f.write("LAUENN STEP 3: PREDICTION AND EVALUATION RESULTS\n")
@@ -308,10 +328,10 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
     print("\n" + "="*70)
     print("STEP 3 EVALUATION COMPLETED SUCCESSFULLY")
     print("="*70)
-    print(f"Model evaluation results saved in: {model_directory}")
+    print(f"Model evaluation results saved in: {output_directory}")
 
     # Save predictions as pickle for further analysis
-    pickle_path = model_directory / f"predictions_{material_}.pickle"
+    pickle_path = output_directory / f"predictions_{material_}.pickle"
     with open(pickle_path, "wb") as f:
         cPickle.dump({
             'y_true': y_test_labels,
@@ -322,7 +342,7 @@ def run_step3(params: Dict[str, Any], data_root: Path | None = None) -> Path:
         }, f)
     print(f"Predictions saved to: {pickle_path}")
 
-    return model_directory
+    return output_directory
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -339,7 +359,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--data-root",
         type=Path,
         default=Path("project"),
-        help="Base directory where Step 2 model folder is located (default: project/).",
+        help="Base directory where Step 1 data folder is located (default: project/).",
+    )
+    parser.add_argument(
+        "--model-root",
+        type=Path,
+        default=None,
+        help="Base directory where Step 2 model artifacts are located (default: same as --data-root).",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help="Base directory where Step 3 report artifacts are written (default: same as --model-root/--data-root).",
     )
     return parser
 
@@ -349,7 +381,12 @@ def main() -> None:
     args = parser.parse_args()
 
     params = load_config(args.config, STEP3_DEFAULTS)
-    model_directory = run_step3(params, data_root=args.data_root)
+    model_directory = run_step3(
+        params,
+        data_root=args.data_root,
+        model_root=args.model_root,
+        output_root=args.output_root,
+    )
     print(f"\nStep 3 completed. Results written to: {model_directory}")
 
 
