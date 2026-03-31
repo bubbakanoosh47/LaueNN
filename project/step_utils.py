@@ -77,6 +77,33 @@ def get_save_directory(params: Dict[str, Any], output_root: Path | None) -> Path
     return save_directory
 
 
+def get_input_directory(params: Dict[str, Any], input_root: Path | None) -> Path:
+    """Resolve the material-based input directory path WITHOUT creating it.
+
+    Use this for directories that must already exist (outputs of a prior step).
+    Unlike get_save_directory, this never creates the directory so the caller's
+    ``exists()`` check is meaningful.
+
+    Args:
+        params: Configuration dictionary with material_ and material1_ keys
+        input_root: Base directory to look under
+
+    Returns:
+        Path to the expected directory (not guaranteed to exist)
+    """
+    material_ = params["material_"]
+    material1_ = params.get("material1_", material_)
+    prefix = params.get("prefix", "")
+
+    if material_ != material1_:
+        folder_name = f"{material_}_{material1_}{prefix}"
+    else:
+        folder_name = f"{material_}{prefix}"
+
+    base = input_root if input_root is not None else Path.cwd()
+    return base / folder_name
+
+
 def get_material_prefix(params: Dict[str, Any]) -> str:
     """Get material prefix string for file naming.
     

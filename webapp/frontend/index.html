@@ -126,8 +126,57 @@
         margin: 0;
         padding-left: 18px;
       }
+      .section-title {
+        margin: 14px 0 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #e5e7eb;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #374151;
+      }
+      .hkl-viewer-grid {
+        display: grid;
+        grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+        gap: 12px;
+        margin-top: 10px;
+      }
+      .hkl-table-wrap {
+        max-height: 360px;
+        overflow: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+      .hkl-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      .hkl-table th,
+      .hkl-table td {
+        border-bottom: 1px solid #f1f5f9;
+        padding: 6px;
+        text-align: left;
+      }
+      .hkl-table tr.selected {
+        background: #eff6ff;
+      }
+      .hkl-plot-card {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 8px;
+        background: #fcfcfd;
+      }
+      .hkl-plot-svg {
+        width: 100%;
+        height: 260px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #ffffff;
+      }
       @media (max-width: 900px) {
         .row { grid-template-columns: 1fr; }
+        .hkl-viewer-grid { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -137,6 +186,16 @@
       const { useEffect, useMemo, useState } = React;
 
       const STEP_ORDER = ["step1", "step2", "step3", "step5", "step6"];
+
+      const HIDDEN_MATERIAL_FIELDS = new Set([
+        "material_",
+        "material1_",
+        "symmetry",
+        "symmetry1",
+        "SG",
+        "SG1",
+        "prefix",
+      ]);
 
       function isPrimitive(value) {
         return ["string", "number", "boolean"].includes(typeof value) || value === null;
@@ -153,9 +212,246 @@
         return raw;
       }
 
+      function applyMaterialDerivedFields(stepConfig, selectedMaterial, materialProfile) {
+        const next = { ...(stepConfig || {}) };
+        const symmetry = materialProfile?.symmetry ?? null;
+        const sg = materialProfile?.SG ?? null;
+
+        if (Object.prototype.hasOwnProperty.call(next, "material_")) {
+          next.material_ = selectedMaterial;
+        }
+        if (Object.prototype.hasOwnProperty.call(next, "material1_")) {
+          next.material1_ = selectedMaterial;
+        }
+        if (Object.prototype.hasOwnProperty.call(next, "prefix")) {
+          next.prefix = "";
+        }
+
+        if (symmetry) {
+          if (Object.prototype.hasOwnProperty.call(next, "symmetry")) {
+            next.symmetry = symmetry;
+          }
+          if (Object.prototype.hasOwnProperty.call(next, "symmetry1")) {
+            next.symmetry1 = symmetry;
+          }
+        }
+        if (sg !== null && sg !== undefined) {
+          if (Object.prototype.hasOwnProperty.call(next, "SG")) {
+            next.SG = sg;
+          }
+          if (Object.prototype.hasOwnProperty.call(next, "SG1")) {
+            next.SG1 = sg;
+          }
+        }
+
+        return next;
+      }
+
+      function normalizeConfigsForMaterial(defaultsByStep, selectedMaterial, materialProfile) {
+        const normalized = {};
+        Object.entries(defaultsByStep || {}).forEach(([stepKey, stepConfig]) => {
+          normalized[stepKey] = applyMaterialDerivedFields(stepConfig, selectedMaterial, materialProfile);
+        });
+        return normalized;
+      }
+
+      function sectionNameForField(stepKey, fieldName) {
+        const detectorFields = new Set([
+          "detectorparameters",
+          "pixelsize",
+          "dim1",
+          "dim2",
+          "geometry",
+          "detector_center",
+        ]);
+        const grainFields = new Set([
+          "hkl_max_identify",
+          "hkl_max_identify1",
+          "maximum_angle_to_search",
+          "step_for_binning",
+          "nb_grains_per_lp",
+          "nb_grains_per_lp_mat0",
+          "nb_grains_per_lp_mat1",
+          "grains_nb_simulate",
+          "misorientation_angle",
+          "modelp",
+        ]);
+        const preflightFields = new Set([
+          "require_step0_preflight",
+          "preflight_max_age_days",
+        ]);
+        const energyFields = new Set(["emin", "emax"]);
+
+        if (detectorFields.has(fieldName)) return "Detector";
+        if (grainFields.has(fieldName)) return "Grain Parameters";
+        if (preflightFields.has(fieldName)) return "Preflight Checks";
+        if (energyFields.has(fieldName)) return "Energy";
+
+        if (stepKey === "step2") {
+          return "Training Parameters";
+        }
+        if (stepKey === "step3") {
+          if (fieldName.includes("threshold") || fieldName.includes("tolerance")) {
+            return "Prediction Thresholds";
+          }
+          if (fieldName.includes("grid") || fieldName.includes("test_")) {
+            return "Simulation Controls";
+          }
+          return "Prediction Parameters";
+        }
+        if (stepKey === "step5" || stepKey === "step6") {
+          if (fieldName.startsWith("input_") || fieldName.includes("glob") || fieldName === "recursive" || fieldName === "limit_images") {
+            return "Input Data";
+          }
+          if (fieldName === "blob_detection" || fieldName === "saturation_value" || fieldName === "nb_spots_consider") {
+            return "Spot Detection";
+          }
+          if (fieldName.startsWith("save_") || fieldName.endsWith("subdir")) {
+            return "Output";
+          }
+        }
+
+        return "General";
+      }
+
+      function sectionOrder(stepKey) {
+        if (stepKey === "step1") {
+          return ["Detector", "Energy", "Grain Parameters", "Preflight Checks", "General"];
+        }
+        if (stepKey === "step2") {
+          return ["Training Parameters", "General"];
+        }
+        if (stepKey === "step3") {
+          return ["Detector", "Energy", "Prediction Thresholds", "Simulation Controls", "Prediction Parameters", "General"];
+        }
+        if (stepKey === "step5" || stepKey === "step6") {
+          return ["Input Data", "Detector", "Spot Detection", "Output", "General"];
+        }
+        return ["General"];
+      }
+
+      const FIELD_LABELS = {
+        // Detector
+        detectorparameters:       "Detector Geometry [dist, cx, cy, β, γ]",
+        pixelsize:                "Pixel Size (mm/px)",
+        dim1:                     "Detector Width (px)",
+        dim2:                     "Detector Height (px)",
+        detector_center:          "Detector Centre Override [cx, cy]",
+        geometry:                 "Geometry Mode",
+        // Energy
+        emin:                     "Min Energy (keV)",
+        emax:                     "Max Energy (keV)",
+        // HKL / grain
+        hkl_max_identify:         "Max HKL Index (Mat 1)",
+        hkl_max_identify1:        "Max HKL Index (Mat 2)",
+        maximum_angle_to_search:  "Max Search Angle (°)",
+        step_for_binning:         "Angular Bin Width (°)",
+        nb_grains_per_lp:         "Grains per Laue Pattern",
+        nb_grains_per_lp_mat0:    "Grains per Pattern (Mat 1)",
+        nb_grains_per_lp_mat1:    "Grains per Pattern (Mat 2)",
+        grains_nb_simulate:       "Orientations to Simulate",
+        misorientation_angle:     "Misorientation Angle (°)",
+        modelp:                   "Orientation Sampling Model",
+        // Dataset quality
+        validation_split_factor:  "Validation Split (1/N)",
+        freq_rmv:                 "Min Spot Frequency — Mat 1",
+        freq_rmv1:                "Min Spot Frequency — Mat 2",
+        general_diff_cond:        "Apply General Diffraction Conditions",
+        general_diff_rules:       "Use General Diffraction Rules",
+        include_scm:              "Include Structure-Factor Weights",
+        data_realism:             "Add Experimental Noise",
+        // Preflight
+        require_step0_preflight:  "Require Detector Preflight",
+        preflight_max_age_days:   "Max Preflight Age (days)",
+        // Training
+        batch_size:               "Batch Size",
+        epochs:                   "Training Epochs",
+        kernel_coeff:             "Kernel L2 Regularisation",
+        bias_coeff:               "Bias L2 Regularisation",
+        learning_rate:            "Learning Rate",
+        patience:                 "Early Stopping Patience",
+        activation:               "Activation Function",
+        dropout_rate:             "Dropout Rate",
+        // Prediction / evaluation
+        test_batch_size:          "Test Batch Size",
+        num_test_batches:         "Number of Test Batches",
+        softmax_threshold:        "Confidence Threshold",
+        match_rate_threshold:     "Match Rate Threshold",
+        strain_calculation:       "Calculate Strain Tensor",
+        tolerance_angle:          "Angular Tolerance — Mat 1 (°)",
+        tolerance_angle1:         "Angular Tolerance — Mat 2 (°)",
+        use_test_data_for_indexation: "Use Test Data for Indexation",
+        use_simulated_dataset:    "Generate Simulated Patterns",
+        grid_size_x:              "Simulation Grid X",
+        grid_size_y:              "Simulation Grid Y",
+        n_jobs:                   "Parallel Workers (−1 = all CPUs)",
+        // Step 5/6 input
+        input_path:               "Input Image Path",
+        image_glob:               "Image File Pattern",
+        recursive:                "Recursive Directory Search",
+        limit_images:             "Max Images to Process",
+        // Step 5/6 spot detection
+        blob_detection:           "Blob Detection Settings",
+        saturation_value:         "Saturation Threshold",
+        nb_spots_consider:        "Spots to Evaluate per Pattern",
+        // Step 5/6 output
+        output_subdir:            "Output Subdirectory",
+        save_plots:               "Save Diagnostic Plots",
+        save_overlay:             "Save Overlay Images",
+        save_cor_file:            "Save .cor File",
+      };
+
+      function friendlyFieldName(fieldName) {
+        return FIELD_LABELS[fieldName] ?? fieldName;
+      }
+
+      function buildSections(stepKey, entries) {
+        const grouped = new Map();
+        entries.forEach(([key, value]) => {
+          const section = sectionNameForField(stepKey, key);
+          if (!grouped.has(section)) {
+            grouped.set(section, []);
+          }
+          grouped.get(section).push([key, value]);
+        });
+
+        const ordered = [];
+        sectionOrder(stepKey).forEach((name) => {
+          if (grouped.has(name)) {
+            ordered.push({ name, entries: grouped.get(name) });
+            grouped.delete(name);
+          }
+        });
+
+        grouped.forEach((sectionEntries, name) => {
+          ordered.push({ name, entries: sectionEntries });
+        });
+
+        return ordered;
+      }
+
+      function hklColor(h, k, l) {
+        const PALETTE = ["#ef4444","#f97316","#eab308","#22c55e","#14b8a6","#3b82f6","#8b5cf6","#ec4899","#0891b2","#64748b","#b45309","#be185d"];
+        const key = `${h},${k},${l}`;
+        let hash = 0;
+        for (let i = 0; i < key.length; i++) {
+          hash = ((hash * 31) + key.charCodeAt(i)) & 0x7fffffff;
+        }
+        return PALETTE[hash % PALETTE.length];
+      }
+
+      function scaleLinear(value, minValue, maxValue, minPixel, maxPixel) {
+        if (maxValue === minValue) {
+          return (minPixel + maxPixel) / 2;
+        }
+        const t = (value - minValue) / (maxValue - minValue);
+        return minPixel + t * (maxPixel - minPixel);
+      }
+
       function App() {
         const [meta, setMeta] = useState(null);
         const [material, setMaterial] = useState("");
+        const [materialProfile, setMaterialProfile] = useState(null);
         const [configs, setConfigs] = useState({});
         const [activeStep, setActiveStep] = useState("step1");
         const [jobs, setJobs] = useState([]);
@@ -165,6 +461,13 @@
         const [reportData, setReportData] = useState(null);
         const [reportError, setReportError] = useState("");
         const [workflowId, setWorkflowId] = useState("");
+        const [grainList, setGrainList] = useState(null);
+        const [grainListError, setGrainListError] = useState("");
+        const [loadingGrains, setLoadingGrains] = useState(false);
+        const [selectedGrainPath, setSelectedGrainPath] = useState(null);
+        const [grainData, setGrainData] = useState(null);
+        const [loadingGrainData, setLoadingGrainData] = useState(false);
+        const [grainSplitFilter, setGrainSplitFilter] = useState("all");
 
         const orderedSteps = useMemo(() => {
           if (!meta?.steps) return [];
@@ -172,8 +475,25 @@
           return STEP_ORDER.filter((key) => byKey.has(key)).map((key) => byKey.get(key));
         }, [meta]);
 
+        // Track step completion for current workflow session
+        const stepStatus = useMemo(() => {
+          if (!workflowId) return {};
+          const result = {};
+          jobs.forEach((job) => {
+            if (job.workflow_id !== workflowId) return;
+            const existing = result[job.step];
+            if (!existing || job.start_time > existing.start_time) {
+              result[job.step] = job;
+            }
+          });
+          return result;
+        }, [jobs, workflowId]);
+
         const activeStepSpec = orderedSteps.find((s) => s.key === activeStep);
         const activeConfig = configs[activeStep] || {};
+        const visibleEntries = Object.entries(activeConfig).filter(([key]) => !HIDDEN_MATERIAL_FIELDS.has(key));
+        const groupedSections = buildSections(activeStep, visibleEntries);
+        const activeMaterialProfile = materialProfile;
 
         useEffect(() => {
           loadMeta();
@@ -186,9 +506,17 @@
           const query = materialOverride ? `?material=${encodeURIComponent(materialOverride)}` : "";
           const response = await fetch(`/api/workflow/meta${query}`);
           const data = await response.json();
+          const selectedMaterial = data.selected_material;
+          const selectedMaterialProfile = data.material_profile || null;
+          const normalizedDefaults = normalizeConfigsForMaterial(
+            data.defaults || {},
+            selectedMaterial,
+            selectedMaterialProfile,
+          );
           setMeta(data);
-          setMaterial(data.selected_material);
-          setConfigs(data.defaults || {});
+          setMaterial(selectedMaterial);
+          setMaterialProfile(selectedMaterialProfile);
+          setConfigs(normalizedDefaults);
           if (!activeStep || !(data.defaults || {})[activeStep]) {
             setActiveStep("step1");
           }
@@ -259,7 +587,73 @@
           }
           setSelectedJobId(jobId);
           setReportData(data);
+          setGrainList(null);
+          setGrainListError("");
+          setSelectedGrainPath(null);
+          setGrainData(null);
+          setGrainSplitFilter("all");
+          await loadGrainList(jobId);
         }
+
+        async function loadGrainList(jobId) {
+          setLoadingGrains(true);
+          setGrainListError("");
+          setSelectedGrainPath(null);
+          setGrainData(null);
+          const response = await fetch(`/api/jobs/${jobId}/step1-grains`);
+          const data = await response.json();
+          setLoadingGrains(false);
+          if (!response.ok) {
+            setGrainList(null);
+            setGrainListError(data.detail || "Failed to load grain list");
+            return;
+          }
+          setGrainList(data);
+        }
+
+        async function loadGrainData(relativePath) {
+          setLoadingGrainData(true);
+          const response = await fetch(`/api/jobs/${selectedJobId}/step1-grain-data?path=${encodeURIComponent(relativePath)}`);
+          const data = await response.json();
+          setLoadingGrainData(false);
+          if (!response.ok) return;
+          setGrainData(data);
+        }
+
+        const displayedGrains = useMemo(() => {
+          const list = grainList?.grains || [];
+          if (grainSplitFilter === "all") return list;
+          return list.filter((g) => g.split === grainSplitFilter);
+        }, [grainList, grainSplitFilter]);
+
+        const spots = grainData?.spots || [];
+
+        const spotDomain = useMemo(() => {
+          if (!spots.length) return { minX: 0, maxX: 90, minY: -180, maxY: 180 };
+          const tths = spots.filter((s) => s.tth != null).map((s) => s.tth);
+          const chis = spots.filter((s) => s.chi != null).map((s) => s.chi);
+          if (!tths.length) return { minX: 0, maxX: 90, minY: -180, maxY: 180 };
+          return {
+            minX: Math.min(...tths) - 2,
+            maxX: Math.max(...tths) + 2,
+            minY: Math.min(...chis) - 5,
+            maxY: Math.max(...chis) + 5,
+          };
+        }, [spots]);
+
+        const uniqueHkls = useMemo(() => {
+          const seen = new Set();
+          const result = [];
+          for (const spot of spots) {
+            if (spot.h == null) continue;
+            const key = `${spot.h},${spot.k},${spot.l}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              result.push([spot.h, spot.k, spot.l]);
+            }
+          }
+          return result;
+        }, [spots]);
 
         if (!meta) {
           return <div className="container"><div className="card">Loading workflow metadata...</div></div>;
@@ -296,7 +690,31 @@
                   Start New Workflow Session
                 </button>
               </div>
-              <div className="muted">Current workflow session: {workflowId || "(new session will be created on next run)"}</div>
+              <div className="muted">
+                Workflow session: {workflowId
+                  ? <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 12 }}>{workflowId}</span>
+                  : <em>(a new session will start on first run)</em>}
+                {workflowId && Object.keys(stepStatus).length > 0 && (
+                  <span style={{ marginLeft: 8 }}>
+                    {STEP_ORDER.filter(k => stepStatus[k]).map(k => {
+                      const sj = stepStatus[k];
+                      const ok = sj.status === "finished" && sj.returncode === 0;
+                      return (
+                        <span key={k} style={{ marginRight: 4, color: ok ? "#16a34a" : "#dc2626" }}>
+                          {k}{ok ? " ✓" : " ✗"}
+                        </span>
+                      );
+                    })}
+                  </span>
+                )}
+              </div>
+              <div className="muted" style={{ marginTop: "8px" }}>
+                Auto-derived input: material_={material}, material1_={material}
+                {activeMaterialProfile?.symmetry ? `, symmetry=${activeMaterialProfile.symmetry}` : ""}
+                {activeMaterialProfile?.SG !== null && activeMaterialProfile?.SG !== undefined
+                  ? `, SG=${activeMaterialProfile.SG}`
+                  : ""}
+              </div>
             </div>
 
             <div className="row">
@@ -304,15 +722,26 @@
                 <div className="card">
                   <h2 style={{ marginTop: 0 }}>Workflow Steps</h2>
                   <div className="step-tabs">
-                    {orderedSteps.map((step) => (
-                      <button
-                        key={step.key}
-                        className={`step-tab ${activeStep === step.key ? "active" : ""}`}
-                        onClick={() => setActiveStep(step.key)}
-                      >
-                        {step.title}
-                      </button>
-                    ))}
+                    {orderedSteps.map((step) => {
+                      const sj = stepStatus[step.key];
+                      const badge = !sj ? null
+                        : sj.status === "finished" && sj.returncode === 0 ? " ✓"
+                        : sj.status === "running" ? " ⏳"
+                        : sj.status === "failed" || sj.returncode !== 0 ? " ✗"
+                        : null;
+                      return (
+                        <button
+                          key={step.key}
+                          className={`step-tab ${activeStep === step.key ? "active" : ""}`}
+                          style={badge === " ✓" ? { borderColor: "#16a34a", background: sj && activeStep === step.key ? "#f0fdf4" : "" }
+                               : badge === " ✗" ? { borderColor: "#dc2626", background: sj && activeStep === step.key ? "#fef2f2" : "" }
+                               : {}}
+                          onClick={() => setActiveStep(step.key)}
+                        >
+                          {step.title}{badge && <span style={{ fontWeight: badge === " ✓" ? 700 : 400, color: badge === " ✓" ? "#16a34a" : badge === " ✗" ? "#dc2626" : "#92400e" }}>{badge}</span>}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -320,36 +749,41 @@
                   <h3 style={{ marginTop: 0 }}>{activeStepSpec?.title || activeStep}</h3>
                   <p className="muted">{activeStepSpec?.description}</p>
 
-                  {Object.entries(activeConfig).map(([key, value]) => (
-                    <div className="field" key={key}>
-                      <label>{key}</label>
-                      {isPrimitive(value) && typeof value !== "boolean" && (
-                        <input
-                          value={value ?? ""}
-                          onChange={(ev) => updateField(activeStep, key, parseInput(ev.target.value, value))}
-                        />
-                      )}
-                      {typeof value === "boolean" && (
-                        <input
-                          type="checkbox"
-                          checked={value}
-                          onChange={(ev) => updateField(activeStep, key, ev.target.checked)}
-                          style={{ width: "auto" }}
-                        />
-                      )}
-                      {!isPrimitive(value) && (
-                        <textarea
-                          value={JSON.stringify(value, null, 2)}
-                          onChange={(ev) => {
-                            try {
-                              const parsed = JSON.parse(ev.target.value);
-                              updateField(activeStep, key, parsed);
-                            } catch (error) {
-                              // keep last valid value until JSON is valid
-                            }
-                          }}
-                        />
-                      )}
+                  {groupedSections.map((section) => (
+                    <div key={section.name}>
+                      <div className="section-title">{section.name}</div>
+                      {section.entries.map(([key, value]) => (
+                        <div className="field" key={key}>
+                          <label>{friendlyFieldName(key)}</label>
+                          {isPrimitive(value) && typeof value !== "boolean" && (
+                            <input
+                              value={value ?? ""}
+                              onChange={(ev) => updateField(activeStep, key, parseInput(ev.target.value, value))}
+                            />
+                          )}
+                          {typeof value === "boolean" && (
+                            <input
+                              type="checkbox"
+                              checked={value}
+                              onChange={(ev) => updateField(activeStep, key, ev.target.checked)}
+                              style={{ width: "auto" }}
+                            />
+                          )}
+                          {!isPrimitive(value) && (
+                            <textarea
+                              value={JSON.stringify(value, null, 2)}
+                              onChange={(ev) => {
+                                try {
+                                  const parsed = JSON.parse(ev.target.value);
+                                  updateField(activeStep, key, parsed);
+                                } catch (error) {
+                                  // keep last valid value until JSON is valid
+                                }
+                              }}
+                            />
+                          )}
+                        </div>
+                      ))}
                     </div>
                   ))}
 
@@ -457,6 +891,170 @@
                           </div>
                         );
                       })}
+
+                      <div style={{ marginTop: "14px" }}>
+                        <div><strong>Step 1 Training Data Viewer</strong></div>
+                        <div className="muted">
+                          Each row is one simulated grain structure from Step 1. Select a row to inspect its Laue spot pattern and HKL assignments.
+                        </div>
+                        <div className="actions" style={{ marginTop: "8px" }}>
+                          <button onClick={() => loadGrainList(selectedJobId || reportData.job?.id)} disabled={loadingGrains}>
+                            {loadingGrains ? "Loading grains..." : "Reload Grain List"}
+                          </button>
+                          {["all", "training", "testing"].map((f) => (
+                            <button
+                              key={f}
+                              onClick={() => setGrainSplitFilter(f)}
+                              style={grainSplitFilter === f ? { background: "#eff6ff", borderColor: "#2563eb" } : {}}
+                            >
+                              {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+
+                        {grainListError && (
+                          <div className="muted" style={{ marginTop: "8px", color: "#b91c1c" }}>
+                            {grainListError}
+                          </div>
+                        )}
+
+                        {grainList && (
+                          <div style={{ marginTop: "8px" }}>
+                            <div className="muted">
+                              Material: {grainList.material || "-"} · Total: {grainList.total}
+                              {" · "}Training: {(grainList.grains || []).filter((g) => g.split === "training").length}
+                              {" · "}Testing: {(grainList.grains || []).filter((g) => g.split === "testing").length}
+                            </div>
+
+                            <div className="hkl-viewer-grid">
+                              <div>
+                                <div className="hkl-table-wrap">
+                                  <table className="hkl-table">
+                                    <thead>
+                                      <tr>
+                                        <th>#</th>
+                                        <th>Split</th>
+                                        <th>File</th>
+                                        <th>Spots</th>
+                                        <th>Type</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {displayedGrains.map((grain, idx) => {
+                                        const isSelected = selectedGrainPath === grain.relative_path;
+                                        return (
+                                          <tr
+                                            key={grain.relative_path}
+                                            className={isSelected ? "selected" : ""}
+                                            onClick={() => {
+                                              setSelectedGrainPath(grain.relative_path);
+                                              loadGrainData(grain.relative_path);
+                                            }}
+                                            style={{ cursor: "pointer" }}
+                                          >
+                                            <td>{idx + 1}</td>
+                                            <td>{grain.split}</td>
+                                            <td
+                                              title={grain.filename}
+                                              style={{ maxWidth: "130px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                                            >
+                                              {grain.filename}
+                                            </td>
+                                            <td>{grain.n_spots ?? "-"}</td>
+                                            <td>{grain.flag_desc ?? "-"}</td>
+                                          </tr>
+                                        );
+                                      })}
+                                      {!displayedGrains.length && (
+                                        <tr>
+                                          <td colSpan={5} className="muted">No grain files found.</td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                {loadingGrainData && (
+                                  <div className="muted" style={{ marginTop: "6px" }}>Loading spot data...</div>
+                                )}
+                              </div>
+
+                              <div className="hkl-plot-card">
+                                {!grainData && !loadingGrainData && (
+                                  <div className="muted">Select a grain row to view its Laue spot pattern.</div>
+                                )}
+                                {grainData && (
+                                  <div>
+                                    <div className="muted" style={{ marginBottom: "6px", fontSize: "11px" }}>
+                                      {grainData.filename} · {grainData.n_spots} spots · flag={grainData.flag ?? "-"}
+                                    </div>
+                                    <svg viewBox="0 0 380 240" className="hkl-plot-svg" role="img" aria-label="Laue spot scatter">
+                                      <line x1="46" y1="208" x2="366" y2="208" stroke="#94a3b8" strokeWidth="1" />
+                                      <line x1="46" y1="12" x2="46" y2="208" stroke="#94a3b8" strokeWidth="1" />
+                                      <text x="206" y="228" fontSize="10" textAnchor="middle" fill="#475569">2theta (deg)</text>
+                                      <text x="10" y="110" fontSize="10" textAnchor="middle" fill="#475569" transform="rotate(-90,10,110)">chi (deg)</text>
+                                      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+                                        const val = spotDomain.minX + t * (spotDomain.maxX - spotDomain.minX);
+                                        const px = scaleLinear(val, spotDomain.minX, spotDomain.maxX, 52, 360);
+                                        return (
+                                          <text key={t} x={px} y={220} fontSize="9" textAnchor="middle" fill="#64748b">
+                                            {val.toFixed(0)}
+                                          </text>
+                                        );
+                                      })}
+                                      {[0, 0.5, 1].map((t) => {
+                                        const val = spotDomain.minY + t * (spotDomain.maxY - spotDomain.minY);
+                                        const py = scaleLinear(val, spotDomain.minY, spotDomain.maxY, 203, 18);
+                                        return (
+                                          <text key={t} x="42" y={py + 3} fontSize="9" textAnchor="end" fill="#64748b">
+                                            {val.toFixed(0)}
+                                          </text>
+                                        );
+                                      })}
+                                      {spots.map((spot) => {
+                                        if (spot.tth == null || spot.chi == null) return null;
+                                        const cx = scaleLinear(spot.tth, spotDomain.minX, spotDomain.maxX, 52, 360);
+                                        const cy = scaleLinear(spot.chi, spotDomain.minY, spotDomain.maxY, 203, 18);
+                                        const color = spot.h != null ? hklColor(spot.h, spot.k, spot.l) : "#94a3b8";
+                                        return (
+                                          <circle key={spot.index} cx={cx} cy={cy} r={3.5} fill={color} opacity="0.85">
+                                            <title>{`${spot.h != null ? `(${spot.h},${spot.k},${spot.l})` : "?"} 2th=${spot.tth?.toFixed(2)} chi=${spot.chi?.toFixed(2)}`}</title>
+                                          </circle>
+                                        );
+                                      })}
+                                    </svg>
+                                    {uniqueHkls.length > 0 && (
+                                      <div style={{ marginTop: "8px" }}>
+                                        <div className="muted" style={{ marginBottom: "4px" }}>
+                                          HKL planes ({uniqueHkls.length}):
+                                        </div>
+                                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                                          {uniqueHkls.slice(0, 24).map(([h, k, l]) => (
+                                            <span
+                                              key={`${h},${k},${l}`}
+                                              style={{
+                                                display: "inline-flex", alignItems: "center", gap: "3px",
+                                                fontSize: "11px", padding: "1px 5px",
+                                                borderRadius: "4px", background: "#f1f5f9",
+                                                border: "1px solid #e2e8f0",
+                                              }}
+                                            >
+                                              <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: hklColor(h, k, l), display: "inline-block" }} />
+                                              {h},{k},{l}
+                                            </span>
+                                          ))}
+                                          {uniqueHkls.length > 24 && (
+                                            <span className="muted">+{uniqueHkls.length - 24} more</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

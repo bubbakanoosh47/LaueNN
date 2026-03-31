@@ -29,7 +29,7 @@ if str(repo_root) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from step_utils import load_config, get_save_directory
+from step_utils import load_config, get_save_directory, get_input_directory
 
 from lauetoolsnn.utils_lauenn import (
     array_generator,
@@ -167,12 +167,14 @@ def run_step2(
     activation = params.get("activation", "relu")
     dropout_rate = float(params.get("dropout_rate", 0.3))
 
-    # Input directory from Step 1
-    input_directory = get_save_directory(params, data_root)
-    if not input_directory.exists():
+    # Input directory from Step 1 (must already exist — do NOT create it)
+    input_directory = get_input_directory(params, data_root)
+    classhkl_sentinel = input_directory / "MOD_grain_classhkl_angbin.npz"
+    if not classhkl_sentinel.exists():
         raise FileNotFoundError(
-            f"Training data directory not found: {input_directory}\n"
-            f"Please run Step 1 first to generate the dataset."
+            f"Step 1 output not found at: {input_directory}\n"
+            f"Please run Step 1 successfully before running Step 2.\n"
+            f"Expected file: MOD_grain_classhkl_angbin.npz"
         )
     print(f"Training data directory: {input_directory}")
 

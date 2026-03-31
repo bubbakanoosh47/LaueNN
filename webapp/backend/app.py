@@ -1,10 +1,12 @@
 import copy
 import importlib.util
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -17,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WEBAPP_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = WEBAPP_ROOT / "frontend"
 PROJECT_DIR = REPO_ROOT / "project"
+MATERIAL_JSON_PATH = REPO_ROOT / "lauetoolsnn" / "lauetools" / "material.json"
 CONFIG_DIR = Path(__file__).resolve().parent / "configs"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -70,6 +73,127 @@ SKIP_DIR_NAMES = {
     "__pycache__",
 }
 
+RULE_TO_PROFILE = {
+    "fcc": {"symmetry": "cubic", "SG": 225},
+    "bcc": {"symmetry": "cubic", "SG": 229},
+    "dia": {"symmetry": "cubic", "SG": 227},
+    "hcp": {"symmetry": "hexagonal", "SG": 194},
+    "wurtzite": {"symmetry": "hexagonal", "SG": 186},
+}
+
+
+def _symmetry_from_sg(space_group: int | None) -> str | None:
+    if space_group is None:
+        return None
+    if 1 <= space_group <= 2:
+        return "triclinic"
+    if 3 <= space_group <= 15:
+        return "monoclinic"
+    if 16 <= space_group <= 74:
+        return "orthorhombic"
+    if 75 <= space_group <= 142:
+        return "tetragonal"
+    if 143 <= space_group <= 167:
+        return "trigonal"
+    if 168 <= space_group <= 194:
+        return "hexagonal"
+    if 195 <= space_group <= 230:
+        return "cubic"
+    return None
+
+
+def _parse_sg_from_rule(rule: Any) -> int | None:
+    if rule is None:
+        return None
+    text = str(rule).strip()
+    if not text:
+        return None
+
+    if text.isdigit():
+        value = int(text)
+        return value if 1 <= value <= 230 else None
+
+    match = re.fullmatch(r"SG(\d{1,3})", text, flags=re.IGNORECASE)
+    if match:
+        value = int(match.group(1))
+        return value if 1 <= value <= 230 else None
+
+    return None
+
+
+def _infer_symmetry_from_lattice(lattice: Any) -> str | None:
+    if not isinstance(lattice, list) or len(lattice) != 6:
+        return None
+    try:
+        a, b, c, alpha, beta, gamma = [float(v) for v in lattice]
+    except (TypeError, ValueError):
+        return None
+
+    def near(x: float, y: float, tol: float = 1e-3) -> bool:
+        return abs(x - y) <= tol
+
+    right_angles = near(alpha, 90.0) and near(beta, 90.0) and near(gamma, 90.0)
+    hex_angles = near(alpha, 90.0) and near(beta, 90.0) and near(gamma, 120.0)
+
+    if right_angles and near(a, b) and near(b, c):
+        return "cubic"
+    if right_angles and near(a, b) and not near(b, c):
+        return "tetragonal"
+    if right_angles and not near(a, b) and not near(b, c) and not near(a, c):
+        return "orthorhombic"
+    if hex_angles and near(a, b):
+        return "hexagonal"
+    if near(alpha, 90.0) and near(gamma, 90.0) and not near(beta, 90.0):
+        return "monoclinic"
+    return "triclinic"
+
+
+def _load_material_catalog() -> Dict[str, Any]:
+    if not MATERIAL_JSON_PATH.exists():
+        return {}
+    try:
+        with open(MATERIAL_JSON_PATH, "r", encoding="utf-8") as file:
+            data = json.load(file)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _get_material_profile(material: str | None) -> Dict[str, Any] | None:
+    if not material:
+        return None
+
+    catalog = _load_material_catalog()
+    entry = catalog.get(material)
+    if not isinstance(entry, list) or len(entry) < 3:
+        return None
+
+    lattice = entry[1] if isinstance(entry[1], list) else None
+    rule = entry[2]
+    rule_key = str(rule).strip().lower() if rule is not None else ""
+
+    derived: Dict[str, Any] = {
+        "material": material,
+        "rule": rule,
+        "lattice": lattice,
+        "symmetry": None,
+        "SG": None,
+    }
+
+    sg_from_rule = _parse_sg_from_rule(rule)
+    if sg_from_rule is not None:
+        derived["SG"] = sg_from_rule
+        derived["symmetry"] = _symmetry_from_sg(sg_from_rule)
+        return derived
+
+    mapped = RULE_TO_PROFILE.get(rule_key)
+    if mapped:
+        derived.update(mapped)
+        return derived
+
+    derived["symmetry"] = _infer_symmetry_from_lattice(lattice)
+    return derived
+
 
 def _load_all_step_defaults() -> Dict[str, Dict[str, Any]]:
     step_defaults_path = PROJECT_DIR / "step_defaults.py"
@@ -90,13 +214,33 @@ def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
     return base
 
 
-def _apply_material(config: Dict[str, Any], material: str | None) -> Dict[str, Any]:
+def _apply_material(
+    config: Dict[str, Any],
+    material: str | None,
+    material_profile: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     if not material:
         return config
+
+    symmetry = material_profile.get("symmetry") if material_profile else None
+    space_group = material_profile.get("SG") if material_profile else None
+
     if "material_" in config:
         config["material_"] = material
     if "material1_" in config:
         config["material1_"] = material
+    if "prefix" in config:
+        config["prefix"] = ""
+    if symmetry:
+        if "symmetry" in config:
+            config["symmetry"] = symmetry
+        if "symmetry1" in config:
+            config["symmetry1"] = symmetry
+    if space_group is not None:
+        if "SG" in config:
+            config["SG"] = int(space_group)
+        if "SG1" in config:
+            config["SG1"] = int(space_group)
     return config
 
 
@@ -147,14 +291,16 @@ def _build_workflow_meta(material: str | None = None) -> Dict[str, Any]:
     all_steps = _load_all_step_defaults()
     default_material = all_steps.get("step1", {}).get("material_", "Ni")
     selected_material = material or default_material
+    material_profile = _get_material_profile(selected_material)
     materials = _discover_materials(default_material)
     defaults = {}
     for step_key in STEP_SPECS.keys():
         step_defaults = copy.deepcopy(all_steps.get(step_key, {}))
-        defaults[step_key] = _apply_material(step_defaults, selected_material)
+        defaults[step_key] = _apply_material(step_defaults, selected_material, material_profile)
     return {
         "default_material": default_material,
         "selected_material": selected_material,
+        "material_profile": material_profile,
         "materials": materials,
         "steps": [{"key": k, **v} for k, v in STEP_SPECS.items()],
         "defaults": defaults,
@@ -293,6 +439,121 @@ def _discover_artifacts(output_dir: Optional[Path]) -> Dict[str, Any]:
     }
 
 
+def _resolve_step1_output_dir(job: Dict[str, Any]) -> Optional[Path]:
+    workflow_roots = job.get("workflow_roots") or {}
+    material = job.get("material")
+    if isinstance(workflow_roots, dict) and workflow_roots.get("step1") and material:
+        return Path(workflow_roots["step1"]) / str(material)
+
+    if str(job.get("step", "")).lower() == "step1":
+        return _resolve_step_output_dir(job)
+
+    return None
+
+
+def _find_step1_npz(step1_dir: Path) -> Optional[Path]:
+    preferred = [
+        step1_dir / "MOD_grain_classhkl_angbin.npz",
+        step1_dir / "grain_classhkl_angbin.npz",
+    ]
+    for candidate in preferred:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+
+    for candidate in sorted(step1_dir.rglob("*.npz")):
+        if candidate.name in {"MOD_grain_classhkl_angbin.npz", "grain_classhkl_angbin.npz"}:
+            return candidate
+    return None
+
+
+def _load_step1_dataset(npz_path: Path) -> Dict[str, Any]:
+    try:
+        npz_data = np.load(npz_path, allow_pickle=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read NPZ file: {exc}") from exc
+
+    classhkl = npz_data.get("arr_0")
+    angbins = npz_data.get("arr_1")
+
+    if classhkl is None:
+        raise HTTPException(status_code=500, detail="Step 1 NPZ missing arr_0 (classhkl)")
+
+    classhkl = np.asarray(classhkl)
+    if classhkl.ndim != 2 or classhkl.shape[1] < 3:
+        raise HTTPException(status_code=500, detail="Unexpected classhkl shape in Step 1 NPZ")
+
+    rows: List[Dict[str, Any]] = []
+    for idx, vec in enumerate(classhkl):
+        h = int(vec[0])
+        k = int(vec[1])
+        l = int(vec[2])
+        rows.append(
+            {
+                "index": idx,
+                "h": h,
+                "k": k,
+                "l": l,
+                "norm": float((h * h + k * k + l * l) ** 0.5),
+            }
+        )
+
+    angbin_list: List[float] = []
+    if angbins is not None:
+        try:
+            flat = np.asarray(angbins).astype(float).ravel()
+            angbin_list = [float(x) for x in flat.tolist()]
+        except Exception:
+            angbin_list = []
+
+    return {
+        "npz_path": _to_rel_repo_path(npz_path),
+        "num_rows": len(rows),
+        "rows": rows,
+        "angbins": angbin_list,
+    }
+
+
+_FLAG_DESCRIPTIONS: Dict[int, str] = {
+    0: "multi-grain",
+    1: "single grain",
+    2: "single grain + misorientation",
+    3: "single grain + large misorientation",
+}
+
+
+def _find_step1_grain_files(step1_dir: Path) -> List[Dict[str, Any]]:
+    grains: List[Dict[str, Any]] = []
+    for split_name in ["training_data", "testing_data"]:
+        split_dir = step1_dir / split_name
+        if not split_dir.exists():
+            continue
+        for f in sorted(split_dir.glob("*.npz")):
+            entry: Dict[str, Any] = {
+                "filename": f.name,
+                "split": split_name.replace("_data", ""),
+                "relative_path": _to_rel_repo_path(f),
+                "n_spots": None,
+                "flag": None,
+                "flag_desc": None,
+            }
+            try:
+                npz_file = np.load(f, allow_pickle=True)
+                arr_codebars = npz_file.get("arr_0")
+                arr_flag = npz_file.get("arr_4")
+                if arr_codebars is not None:
+                    entry["n_spots"] = int(np.asarray(arr_codebars).shape[0])
+                if arr_flag is not None:
+                    flag_arr = np.asarray(arr_flag).ravel()
+                    if flag_arr.size > 0:
+                        flag_val = int(flag_arr[0])
+                        entry["flag"] = flag_val
+                        entry["flag_desc"] = _FLAG_DESCRIPTIONS.get(flag_val, f"flag={flag_val}")
+            except Exception:
+                pass
+            grains.append(entry)
+    return grains
+
+
 def _build_job_report(job: Dict[str, Any]) -> Dict[str, Any]:
     output_dir = _resolve_step_output_dir(job)
     discovered = _discover_artifacts(output_dir)
@@ -369,13 +630,60 @@ async def workflow_run(req: WorkflowRunRequest):
 
     all_steps = _load_all_step_defaults()
     base_defaults = copy.deepcopy(all_steps.get(step, {}))
-    merged = _apply_material(base_defaults, req.material)
-    merged = _deep_merge(merged, req.overrides or {})
+    requested_material = req.material or base_defaults.get("material_")
+    material_profile = _get_material_profile(requested_material)
 
-    material_name = req.material or merged.get("material_", "material")
+    merged = _apply_material(base_defaults, requested_material, material_profile)
+    merged = _deep_merge(merged, req.overrides or {})
+    merged = _apply_material(merged, requested_material, material_profile)
+
+    material_name = requested_material or merged.get("material_", "material")
     config_path = CONFIG_DIR / f"{step}_{material_name}.json"
     with open(config_path, "w", encoding="utf-8") as config_file:
         json.dump(merged, config_file, indent=2)
+
+    # --- Prerequisite checks (before any subprocess is launched) ---
+    step1_sentinel = Path(roots["step1"]) / material_name / "MOD_grain_classhkl_angbin.npz"
+    step2_sentinel = Path(roots["step2"]) / material_name / f"model_{material_name}.json"
+
+    if step == "step2" and not step1_sentinel.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Step 1 output not found for workflow '{workflow_id}'. "
+                f"Please run Step 1 first before starting Step 2. "
+                f"Expected: {step1_sentinel}"
+            ),
+        )
+    if step == "step3":
+        if not step1_sentinel.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Step 1 output not found for workflow '{workflow_id}'. "
+                    f"Please run Step 1 and Step 2 before starting Step 3. "
+                    f"Expected: {step1_sentinel}"
+                ),
+            )
+        if not step2_sentinel.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Step 2 model not found for workflow '{workflow_id}'. "
+                    f"Please run Step 2 before starting Step 3. "
+                    f"Expected: {step2_sentinel}"
+                ),
+            )
+    if step == "step6":
+        if not step2_sentinel.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Step 2 model not found for workflow '{workflow_id}'. "
+                    f"Please run Step 2 before starting Step 6. "
+                    f"Expected: {step2_sentinel}"
+                ),
+            )
 
     if step == "step1":
         output_root = roots["step1"]
@@ -471,6 +779,137 @@ async def get_artifact(path: str):
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="artifact not found")
     return FileResponse(str(p))
+
+
+@app.get("/api/jobs/{job_id}/step1-dataset")
+async def get_step1_dataset(job_id: str):
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    step1_dir = _resolve_step1_output_dir(job)
+    if step1_dir is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to resolve Step 1 output directory for this job",
+        )
+    if not step1_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Step 1 output directory not found: {step1_dir}",
+        )
+
+    npz_path = _find_step1_npz(step1_dir)
+    if npz_path is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Step 1 NPZ dataset not found (expected MOD_grain_classhkl_angbin.npz)",
+        )
+
+    dataset = _load_step1_dataset(npz_path)
+    return {
+        "job_id": job_id,
+        "workflow_id": job.get("workflow_id"),
+        "material": job.get("material"),
+        "step1_output_dir": _to_rel_repo_path(step1_dir),
+        "dataset": dataset,
+    }
+
+
+@app.get("/api/jobs/{job_id}/step1-grains")
+async def get_step1_grains(job_id: str):
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    step1_dir = _resolve_step1_output_dir(job)
+    if step1_dir is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to resolve Step 1 output directory for this job",
+        )
+    if not step1_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Step 1 output directory not found: {step1_dir}",
+        )
+
+    grains = _find_step1_grain_files(step1_dir)
+    return {
+        "job_id": job_id,
+        "workflow_id": job.get("workflow_id"),
+        "material": job.get("material"),
+        "step1_output_dir": _to_rel_repo_path(step1_dir),
+        "total": len(grains),
+        "grains": grains,
+    }
+
+
+@app.get("/api/jobs/{job_id}/step1-grain-data")
+async def get_step1_grain_data(job_id: str, path: str = Query(...)):
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    p = (REPO_ROOT / path).resolve()
+    if not str(p).startswith(str(REPO_ROOT.resolve())):
+        raise HTTPException(status_code=400, detail="invalid artifact path")
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="grain file not found")
+
+    try:
+        npz = np.load(p, allow_pickle=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read grain file: {exc}") from exc
+
+    codebars = npz.get("arr_0")
+    s_tth = npz.get("arr_5")
+    s_chi = npz.get("arr_6")
+    s_miller_ind = npz.get("arr_7")
+    arr_flag = npz.get("arr_4")
+    ori_mat = npz.get("arr_2")
+
+    n_spots = int(np.asarray(codebars).shape[0]) if codebars is not None else 0
+
+    spots: List[Dict[str, Any]] = []
+    for i in range(n_spots):
+        spot: Dict[str, Any] = {"index": i}
+        if s_tth is not None:
+            spot["tth"] = float(np.asarray(s_tth)[i])
+        if s_chi is not None:
+            spot["chi"] = float(np.asarray(s_chi)[i])
+        if s_miller_ind is not None:
+            miller = np.asarray(s_miller_ind)[i]
+            spot["h"] = int(miller[0])
+            spot["k"] = int(miller[1])
+            spot["l"] = int(miller[2])
+        spots.append(spot)
+
+    flag_val = None
+    if arr_flag is not None:
+        try:
+            flag_arr = np.asarray(arr_flag).ravel()
+            if flag_arr.size > 0:
+                flag_val = int(flag_arr[0])
+        except (TypeError, ValueError):
+            pass
+
+    orientation = None
+    if ori_mat is not None:
+        try:
+            orientation = np.asarray(ori_mat).tolist()
+        except Exception:
+            pass
+
+    return {
+        "filename": p.name,
+        "relative_path": _to_rel_repo_path(p),
+        "n_spots": n_spots,
+        "flag": flag_val,
+        "flag_desc": _FLAG_DESCRIPTIONS.get(flag_val, f"flag={flag_val}") if flag_val is not None else None,
+        "orientation": orientation,
+        "spots": spots,
+    }
 
 
 @app.get("/health")

@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 import json
+import numpy as np
 from datetime import datetime, timezone
 
 # Ensure repo root is in path for local lauetoolsnn
@@ -175,6 +176,33 @@ def run_step1(params: Dict[str, Any], output_root: Path | None = None) -> Path:
         material1_=material1_,
         write_to_console=print,
     )
+
+    # Step2 requires at least one output class. Some configurations (e.g., large
+    # freq_rmv with small simulated datasets) can remove every class.
+    mod_classhkl_file = save_directory / "MOD_grain_classhkl_angbin.npz"
+    n_classes_after_filter = len(np.load(mod_classhkl_file)["arr_0"])
+    if n_classes_after_filter == 0:
+        configured_freq_rmv = int(params["freq_rmv"])
+        configured_freq_rmv1 = int(params["freq_rmv1"])
+        print(
+            "Configured class-frequency filter removed all classes "
+            f"(freq_rmv={configured_freq_rmv}, freq_rmv1={configured_freq_rmv1})."
+        )
+        print("Re-running class filtering with freq_rmv=0 and freq_rmv1=0.")
+        rmv_freq_class(
+            freq_rmv=0,
+            freq_rmv1=0,
+            save_directory=str(save_directory),
+            material_=material_,
+            material1_=material1_,
+            write_to_console=print,
+        )
+        n_classes_after_filter = len(np.load(mod_classhkl_file)["arr_0"])
+        if n_classes_after_filter == 0:
+            raise RuntimeError(
+                "Step 1 could not produce any classes even after disabling frequency filtering. "
+                "Please verify material/crystal inputs and generated training labels."
+            )
 
     return save_directory
 

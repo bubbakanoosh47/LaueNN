@@ -258,6 +258,22 @@ Detector parameters were previously:
 **Status:** Applied ✓
 **Context:** Implements first-pass production-ready real experimental image metrics workflow, bridging synthetic validation (Step 4) to real-data QA with optional human/model angle benchmarking.
 
+### 8. Step1 - Prevent Empty Class Set After Frequency Filtering
+**File:** `project/Step1/Step1_Generation_dataset_LaueNN.py` (around `run_step1`, after `rmv_freq_class` call)
+
+**Issue:**
+- Step 1 can generate valid raw classes in `grain_classhkl_angbin.npz` but then remove all classes in `MOD_grain_classhkl_angbin.npz` when `freq_rmv` is too high for the dataset size.
+- This occurred in web run `39b788633b16` where raw classes existed (13), but all class frequencies were `<= 500` (`min=35, median=102, max=217`), so `freq_rmv=500` removed every class.
+- Step 2 then fails because `Output classes: 0`.
+
+**Fix Applied:**
+1. In Step 1, after `rmv_freq_class(...)`, load `MOD_grain_classhkl_angbin.npz` and check class count.
+2. If class count is zero, automatically rerun class filtering with `freq_rmv=0` and `freq_rmv1=0`.
+3. If class count is still zero after fallback, raise a hard error indicating class generation itself is invalid.
+
+**Status:** Applied ✓
+**Context:** Ensures Step 1 outputs a non-empty class set for Step 2 while preserving configured filtering when feasible.
+
 ### 8. Step5 - CSV Template Generator for Human/Reference Data Entry
 **Files:**
 - Created: `project/Step5/Step5_Generate_CSV_Templates.py`
